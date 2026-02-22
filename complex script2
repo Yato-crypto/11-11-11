@@ -323,18 +323,6 @@ local Config = {
         AdaptiveSmoothing = true,
     },
     
-    ESP = {
-        Enabled = true,
-        ShowOverlay = true,
-        ShowHealthBar = true,
-        ShowZoneMarkers = false,
-        OverlayTransparency = 0.8,
-        HealthBarEnabled = true,
-        TrajectoryWarningEnabled = true,
-        TrajectoryWarningColor = Color3.fromRGB(255, 50, 50),
-        UpdateRate = 0.016,
-        BlacklistOnly = true,
-    },
     
     Keybinds = {
         ToggleAimLock = Enum.KeyCode.R,
@@ -343,7 +331,6 @@ local Config = {
         ToggleAlly = Enum.KeyCode.Zero,
         Blacklist = Enum.KeyCode.Nine,
         ToggleTriggerbot = Enum.KeyCode.F,
-        ToggleESP = Enum.KeyCode.Insert,
     },
     
     -- MACRO SYSTEM CONFIG
@@ -1129,64 +1116,6 @@ local PLAYER_ATTACK_ANIMATIONS = {
 local BLOCKED_ANIMATION_ID = "rbxassetid://71950420880004"
 
 -- ============================================================
--- ESP ZONE MARKER CONFIGURATION
--- ============================================================
-local ESP_ZONE_MARKERS = {
-    {
-        name = "Fart range",
-        type = "dome",
-        shapeType = "cube",
-        distance = 30,
-        size = 1,
-        color = Color3.fromRGB(0, 0, 0),
-        transparency = 0.85,
-        imageId = "",
-        applyTo = "enemy",
-        enabled = false,
-        trajectoryWarning = true,
-    },
-    {
-        name = "Tengu Long Range",
-        type = "spot",
-        shapeType = "circle",
-        distance = 75,
-        size = 2,
-        color = Color3.fromRGB(0, 0, 0),
-        transparency = 0.3,
-        imageId = "rbxassetid://118970675365031",
-        applyTo = "player",
-        enabled = true,
-        trajectoryWarning = true,
-    },
-    {
-        name = "Tengu Short Range",
-        type = "spot",
-        shapeType = "circle",
-        distance = 25,
-        size = 2,
-        color = Color3.fromRGB(0, 0, 0),
-        transparency = 0.3,
-        imageId = "rbxassetid://118970675365031",
-        applyTo = "player",
-        enabled = true,
-        trajectoryWarning = true,
-    },
-    {
-        name = "My Attack Range",
-        type = "dome",
-        shapeType = "dome",
-        distance = 10,
-        size = 1,
-        color = Color3.fromRGB(0, 0, 0),
-        transparency = 0.85,
-        imageId = "",
-        applyTo = "player",
-        enabled = false,
-        trajectoryWarning = true,
-    }
-}
-
--- ============================================================
 -- STATE VARIABLES
 -- ============================================================
 local State = {
@@ -1223,11 +1152,6 @@ local State = {
     allyMarkers = {},
     blacklistMarkers = {},
     
-    espOverlays = {},
-    espHealthBars = {},
-    espZoneMarkers = {},
-    espUpdateTimers = {},
-    lastESPUpdate = 0,
     
     deathConnections = {},
     modelAddedConnections = {},
@@ -1354,8 +1278,6 @@ local function debugPrint(system, msg)
         print("[DODGE]", msg)
     elseif system == "triggerbot" and Config.Triggerbot.DebugPrints then
         print("[TRIGGERBOT]", msg)
-    elseif system == "esp" then
-        print("[ESP]", msg)
     elseif system == "macro" and Config.Macros.DebugMode then
         print("[MACRO]", msg)
     end
@@ -1952,7 +1874,7 @@ local function updateTargetMarker(target)
 end
 
 -- ============================================================
--- SEGMENT 3: ALLY/BLACKLIST MARKERS (FIXED FOR PERSISTENCE), TARGET SELECTION, ESP CORE
+-- SEGMENT 3: ALLY/BLACKLIST MARKERS (FIXED FOR PERSISTENCE), TARGET SELECTION
 -- ============================================================
 
 -- ============================================================
@@ -2209,10 +2131,6 @@ local function getModelUnderMouse()
     return nil
 end
 
--- Forward declarations for ESP functions
-local createESPOverlay, createESPHealthBar, createZoneMarker
-local removeESPOverlay, removeESPHealthBar, removeAllZoneMarkers
-
 local function addToBlacklist(characterModel)
     if not characterModel or isMyCharacter(characterModel) then return end
     State.blacklistedModels[characterModel] = true
@@ -2299,599 +2217,6 @@ local function selectTargetByMode()
     end
     
     return nil
-end
-
--- ============================================================
--- ESP VISIBILITY
--- ============================================================
-local function shouldShowESP(characterModel)
-    if not Config.ESP.Enabled then return false end
-    if isMyCharacter(characterModel) then return false end
-    return true
-end
-
-local function getHealthColor(healthPercent)
-    if healthPercent >= 75 then
-        return Color3.fromRGB(100, 200, 255)
-    elseif healthPercent >= 50 then
-        return Color3.fromRGB(150, 220, 255)
-    elseif healthPercent >= 25 then
-        return Color3.fromRGB(255, 180, 150)
-    else
-        return Color3.fromRGB(255, 100, 100)
-    end
-end
-
--- ============================================================
--- ESP OVERLAY
--- ============================================================
-createESPOverlay = function(characterModel)
-    if not shouldShowESP(characterModel) then return end
-    if not characterModel or not characterModel.Parent then return end
-    if State.espOverlays[characterModel] then return end
-    
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Overlay_" .. characterModel.Name
-    highlight.FillColor = Color3.fromRGB(0, 0, 0)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = Config.ESP.OverlayTransparency
-    highlight.OutlineTransparency = 0.3
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent = characterModel
-    highlight.Adornee = characterModel
-    
-    State.espOverlays[characterModel] = highlight
-end
-
-removeESPOverlay = function(characterModel)
-    if State.espOverlays[characterModel] then
-        pcall(function() State.espOverlays[characterModel]:Destroy() end)
-        State.espOverlays[characterModel] = nil
-    end
-end
-
-local function updateESPOverlay(characterModel)
-    if not Config.ESP.ShowOverlay or not Config.ESP.Enabled then return end
-    if not State.espOverlays[characterModel] then return end
-    
-    local highlight = State.espOverlays[characterModel]
-    if not highlight or not highlight.Parent then return end
-    
-    highlight.FillTransparency = Config.ESP.OverlayTransparency
-end
-
--- ============================================================
--- ESP HEALTH BAR
--- ============================================================
-createESPHealthBar = function(characterModel)
-    if not shouldShowESP(characterModel) then return end
-    if not characterModel or not characterModel.Parent then return end
-    if State.espHealthBars[characterModel] then return end
-    
-    local hrp = getHRP(characterModel)
-    if not hrp then return end
-    
-    local billboardGui = Instance.new("BillboardGui")
-    billboardGui.Name = "ESP_HealthBar_" .. characterModel.Name
-    billboardGui.Adornee = hrp
-    billboardGui.Size = UDim2.new(0, 120, 0, 40)
-    billboardGui.StudsOffset = Vector3.new(0, 3, 0)
-    billboardGui.AlwaysOnTop = true
-    billboardGui.Parent = hrp
-    
-    local healthLabel = Instance.new("TextLabel")
-    healthLabel.Name = "HealthLabel"
-    healthLabel.Size = UDim2.new(1, 0, 1, 0)
-    healthLabel.BackgroundTransparency = 1
-    healthLabel.Text = "100"
-    healthLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-    healthLabel.TextSize = 18
-    healthLabel.Font = Enum.Font.GothamBold
-    healthLabel.TextStrokeTransparency = 0.5
-    healthLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    healthLabel.Parent = billboardGui
-    
-    State.espHealthBars[characterModel] = billboardGui
-end
-
-removeESPHealthBar = function(characterModel)
-    if State.espHealthBars[characterModel] then
-        pcall(function() State.espHealthBars[characterModel]:Destroy() end)
-        State.espHealthBars[characterModel] = nil
-    end
-end
-
-local function updateESPHealthBar(characterModel)
-    if not Config.ESP.HealthBarEnabled or not Config.ESP.Enabled then return end
-    if not State.espHealthBars[characterModel] then return end
-    if not characterModel or not characterModel.Parent then return end
-    
-    local hum = getHum(characterModel)
-    if not hum then return end
-    
-    local healthPercent = (hum.Health / hum.MaxHealth) * 100
-    local healthLabel = State.espHealthBars[characterModel]:FindFirstChild("HealthLabel")
-    
-    if healthLabel then
-        healthLabel.Text = string.format("%.0f", healthPercent)
-        healthLabel.TextColor3 = getHealthColor(healthPercent)
-    end
-end
-
--- ============================================================
--- SEGMENT 4: ZONE MARKERS (CREATION, TRAJECTORY, UPDATE, REFRESH)
--- ============================================================
-
--- ============================================================
--- ZONE MARKER TRAJECTORY COLLISION
--- ============================================================
-local function checkTrajectoryCollision(ownerHRP, targetHRP, config, isOwnerPlayer)
-    if not Config.ESP.TrajectoryWarningEnabled or not config.trajectoryWarning then
-        return false
-    end
-    
-    if not ownerHRP or not targetHRP then return false end
-    
-    local myRoot = myHRP()
-    if not myRoot then return false end
-    
-    local shouldWarn = false
-    
-    if config.type == "dome" then
-        local centerPos = ownerHRP.Position
-        local distanceFromCenter = (targetHRP.Position - centerPos).Magnitude
-        local radius = config.distance
-        
-        local isInsideZone = distanceFromCenter <= radius
-        
-        local targetVel = filteredVelocity(targetHRP)
-        local predictedPosition = targetHRP.Position + (targetVel * 0.5)
-        local predictedDistance = (predictedPosition - centerPos).Magnitude
-        local willCollide = predictedDistance <= radius
-        
-        shouldWarn = isInsideZone or willCollide
-        
-    elseif config.type == "spot" then
-        local ownerLookVector = ownerHRP.CFrame.LookVector
-        local spotCenter3D = ownerHRP.Position + (ownerLookVector * config.distance)
-        
-        local spotCenterXZ = Vector3.new(spotCenter3D.X, 0, spotCenter3D.Z)
-        
-        local baseSize = 3 * (config.size or 1)
-        local spotRadius = baseSize / 2
-        
-        local targetPosXZ = Vector3.new(targetHRP.Position.X, 0, targetHRP.Position.Z)
-        local distanceToSpot = (targetPosXZ - spotCenterXZ).Magnitude
-        
-        local isOnSpot = distanceToSpot <= spotRadius
-        
-        local targetVel = filteredVelocity(targetHRP)
-        local predictedPosXZ = Vector3.new(
-            targetHRP.Position.X + targetVel.X * 0.5,
-            0,
-            targetHRP.Position.Z + targetVel.Z * 0.5
-        )
-        local predictedDistToSpot = (predictedPosXZ - spotCenterXZ).Magnitude
-        local willCollide = predictedDistToSpot <= spotRadius
-        
-        shouldWarn = isOnSpot or willCollide
-        
-    elseif config.type == "tile" then
-        local direction = (targetHRP.Position - ownerHRP.Position).Unit
-        local distance = (targetHRP.Position - ownerHRP.Position).Magnitude
-        
-        if distance <= config.distance then
-            local midPoint = ownerHRP.Position + (direction * (distance / 2))
-            midPoint = Vector3.new(midPoint.X, ownerHRP.Position.Y - 2.5, midPoint.Z)
-            
-            local targetPos2D = Vector3.new(targetHRP.Position.X, midPoint.Y, targetHRP.Position.Z)
-            local distanceToPath = (targetPos2D - midPoint).Magnitude
-            
-            shouldWarn = distanceToPath <= 1
-        end
-    end
-    
-    return shouldWarn
-end
-
--- ============================================================
--- SPOT MARKER
--- ============================================================
-local function createSpotMarker(config, ownerHRP, targetHRP)
-    local model = Instance.new("Model")
-    model.Name = "ZoneMarker_Spot_" .. config.name
-    
-    local spot = Instance.new("Part")
-    spot.Name = "Spot"
-    
-    local baseSize = 3 * (config.size or 1)
-    
-    if config.shapeType == "square" then
-        spot.Shape = Enum.PartType.Block
-        spot.Size = Vector3.new(baseSize, 0.1, baseSize)
-    else
-        spot.Shape = Enum.PartType.Cylinder
-        spot.Size = Vector3.new(0.1, baseSize, baseSize)
-    end
-    
-    spot.Color = config.color
-    spot.Material = Enum.Material.Neon
-    spot.CanCollide = false
-    spot.Anchored = true
-    spot.Transparency = config.transparency
-    spot.Parent = model
-    
-    if config.imageId and config.imageId ~= "" then
-        local decal = Instance.new("Decal")
-        decal.Texture = config.imageId
-        decal.Face = Enum.NormalId.Top
-        decal.Transparency = config.transparency
-        decal.Parent = spot
-    end
-    
-    local lastUpdateTime = 0
-    local cachedCFrame = CFrame.new()
-    
-    return model, function(dt, ownerModel, targetModel)
-        local liveOwnerHRP = ownerModel and ownerModel:FindFirstChild("HumanoidRootPart")
-        local liveTargetHRP = targetModel and targetModel:FindFirstChild("HumanoidRootPart")
-        
-        if not liveOwnerHRP or not liveOwnerHRP.Parent or not liveTargetHRP or not liveTargetHRP.Parent then return end
-        
-        local now = tick()
-        if now - lastUpdateTime < 0.016 then return end
-        lastUpdateTime = now
-        
-        local ownerLookVector = liveOwnerHRP.CFrame.LookVector
-        local position = liveOwnerHRP.Position + (ownerLookVector * config.distance)
-        position = Vector3.new(position.X, liveOwnerHRP.Position.Y - 2.5, position.Z)
-        
-        local newCFrame
-        if config.shapeType == "square" then
-            local lookAt = CFrame.new(position, position + ownerLookVector)
-            newCFrame = lookAt
-        else
-            local lookAt = CFrame.new(position, position + ownerLookVector)
-            newCFrame = lookAt * CFrame.Angles(0, 0, math.rad(90))
-        end
-        
-        if cachedCFrame.Position ~= Vector3.new() then
-            spot.CFrame = cachedCFrame:Lerp(newCFrame, 0.3)
-        else
-            spot.CFrame = newCFrame
-        end
-        cachedCFrame = spot.CFrame
-        
-        local isOwnerPlayer = config.applyTo == "player"
-        local shouldWarn = checkTrajectoryCollision(liveOwnerHRP, liveTargetHRP, config, isOwnerPlayer)
-        
-        if shouldWarn then
-            spot.Color = Config.ESP.TrajectoryWarningColor
-        else
-            spot.Color = config.color
-        end
-    end
-end
-
--- ============================================================
--- TILE MARKER
--- ============================================================
-local function createTileMarker(config, ownerHRP, targetHRP)
-    local model = Instance.new("Model")
-    model.Name = "ZoneMarker_Tile_" .. config.name
-    
-    local tile = Instance.new("Part")
-    tile.Name = "Tile"
-    tile.Size = Vector3.new(0.5, 0.1, 0.5)
-    tile.Color = config.color
-    tile.Material = Enum.Material.Neon
-    tile.CanCollide = false
-    tile.Anchored = true
-    tile.Transparency = config.transparency
-    tile.Parent = model
-    
-    if config.imageId and config.imageId ~= "" then
-        local decal = Instance.new("Decal")
-        decal.Texture = config.imageId
-        decal.Face = Enum.NormalId.Top
-        decal.Transparency = config.transparency
-        decal.Parent = tile
-    end
-    
-    local lastUpdateTime = 0
-    local cachedCFrame = CFrame.new()
-    local cachedColor = config.color
-    
-    return model, function(dt, ownerModel, targetModel)
-        local liveOwnerHRP = ownerModel and ownerModel:FindFirstChild("HumanoidRootPart")
-        local liveTargetHRP = targetModel and targetModel:FindFirstChild("HumanoidRootPart")
-        
-        if not liveOwnerHRP or not liveOwnerHRP.Parent or not liveTargetHRP or not liveTargetHRP.Parent then return end
-        
-        local now = tick()
-        if now - lastUpdateTime < 0.016 then return end
-        lastUpdateTime = now
-        
-        local direction = (liveTargetHRP.Position - liveOwnerHRP.Position).Unit
-        local distance = (liveTargetHRP.Position - liveOwnerHRP.Position).Magnitude
-        
-        if distance <= config.distance then
-            local midPoint = liveOwnerHRP.Position + (direction * (distance / 2))
-            midPoint = Vector3.new(midPoint.X, liveOwnerHRP.Position.Y - 2.5, midPoint.Z)
-            
-            local newCFrame = CFrame.new(midPoint, Vector3.new(liveTargetHRP.Position.X, midPoint.Y, liveTargetHRP.Position.Z))
-            
-            if cachedCFrame.Position ~= Vector3.new() then
-                tile.CFrame = cachedCFrame:Lerp(newCFrame, 0.3)
-            else
-                tile.CFrame = newCFrame
-            end
-            cachedCFrame = tile.CFrame
-            
-            tile.Size = Vector3.new(2, 0.1, distance)
-            
-            local isOwnerPlayer = config.applyTo == "player"
-            local shouldWarn = checkTrajectoryCollision(liveOwnerHRP, liveTargetHRP, config, isOwnerPlayer)
-            
-            local targetColor = shouldWarn and Config.ESP.TrajectoryWarningColor or config.color
-            
-            if cachedColor ~= targetColor then
-                tile.Color = cachedColor:Lerp(targetColor, 0.2)
-                cachedColor = tile.Color
-            end
-        else
-            tile.Size = Vector3.new(0.1, 0.1, 0.1)
-            tile.CFrame = CFrame.new(0, -9999, 0)
-        end
-    end
-end
-
--- ============================================================
--- DOME MARKER
--- ============================================================
-local function createDomeMarker(config, ownerHRP, targetHRP)
-    local model = Instance.new("Model")
-    model.Name = "ZoneMarker_Dome_" .. config.name
-    
-    local dome = Instance.new("Part")
-    dome.Name = "Dome"
-    
-    if config.shapeType == "cube" then
-        dome.Shape = Enum.PartType.Block
-        dome.Size = Vector3.new(config.distance * 2, config.distance * 2, config.distance * 2)
-    else
-        dome.Shape = Enum.PartType.Ball
-        dome.Size = Vector3.new(config.distance * 2, config.distance * 2, config.distance * 2)
-    end
-    
-    dome.Color = config.color
-    dome.Material = Enum.Material.Neon
-    dome.CanCollide = false
-    dome.Anchored = true
-    dome.Transparency = config.transparency
-    dome.Parent = model
-    
-    if config.imageId and config.imageId ~= "" then
-        local surfaceGui = Instance.new("SurfaceGui")
-        surfaceGui.Face = Enum.NormalId.Front
-        surfaceGui.Parent = dome
-        
-        local imageLabel = Instance.new("ImageLabel")
-        imageLabel.Size = UDim2.new(1, 0, 1, 0)
-        imageLabel.BackgroundTransparency = 1
-        imageLabel.Image = config.imageId
-        imageLabel.ImageTransparency = config.transparency
-        imageLabel.Parent = surfaceGui
-    end
-    
-    local lastUpdateTime = 0
-    local cachedColor = config.color
-    
-    return model, function(dt, ownerModel, targetModel)
-        local liveOwnerHRP = ownerModel and ownerModel:FindFirstChild("HumanoidRootPart")
-        local liveTargetHRP = targetModel and targetModel:FindFirstChild("HumanoidRootPart")
-        
-        if not liveOwnerHRP or not liveOwnerHRP.Parent then return end
-        
-        local now = tick()
-        if now - lastUpdateTime < 0.016 then return end
-        lastUpdateTime = now
-        
-        dome.Position = liveOwnerHRP.Position
-        
-        if liveTargetHRP and liveTargetHRP.Parent then
-            local isOwnerPlayer = config.applyTo == "player"
-            local shouldWarn = checkTrajectoryCollision(liveOwnerHRP, liveTargetHRP, config, isOwnerPlayer)
-            
-            local targetColor = shouldWarn and Config.ESP.TrajectoryWarningColor or config.color
-            
-            if cachedColor ~= targetColor then
-                dome.Color = cachedColor:Lerp(targetColor, 0.2)
-                cachedColor = dome.Color
-            end
-        end
-    end
-end
-
--- ============================================================
--- ZONE MARKER ORCHESTRATION
--- ============================================================
-createZoneMarker = function(config, characterModel)
-    if not config.enabled then return end
-    if not shouldShowESP(characterModel) then return end
-    if not characterModel or not characterModel.Parent then return end
-    
-    local ownerModel, targetModel
-    local ownerHRP, targetHRP
-    
-    if config.applyTo == "player" then
-        ownerModel = LP.Character
-        targetModel = characterModel
-        ownerHRP = myHRP()
-        targetHRP = getHRP(characterModel)
-    else
-        ownerModel = characterModel
-        targetModel = LP.Character
-        ownerHRP = getHRP(characterModel)
-        targetHRP = myHRP()
-    end
-    
-    if not ownerHRP or not targetHRP then return end
-    
-    local model, updateFunc
-    
-    if config.type == "spot" then
-        model, updateFunc = createSpotMarker(config, ownerHRP, targetHRP)
-    elseif config.type == "tile" then
-        model, updateFunc = createTileMarker(config, ownerHRP, targetHRP)
-    elseif config.type == "dome" then
-        model, updateFunc = createDomeMarker(config, ownerHRP, targetHRP)
-    end
-    
-    if model then
-        model.Parent = workspace
-        
-        if not State.espZoneMarkers[characterModel] then
-            State.espZoneMarkers[characterModel] = {}
-        end
-        
-        State.espZoneMarkers[characterModel][config.name] = {
-            model = model,
-            updateFunc = updateFunc,
-            config = config,
-            ownerModel = ownerModel,
-            targetModel = targetModel,
-        }
-    end
-end
-
-local function removeZoneMarker(characterModel, markerName)
-    if State.espZoneMarkers[characterModel] and State.espZoneMarkers[characterModel][markerName] then
-        pcall(function()
-            State.espZoneMarkers[characterModel][markerName].model:Destroy()
-        end)
-        State.espZoneMarkers[characterModel][markerName] = nil
-    end
-end
-
-removeAllZoneMarkers = function(characterModel)
-    if State.espZoneMarkers[characterModel] then
-        for markerName, _ in pairs(State.espZoneMarkers[characterModel]) do
-            removeZoneMarker(characterModel, markerName)
-        end
-        State.espZoneMarkers[characterModel] = nil
-    end
-end
-
--- ============================================================
--- ZONE MARKER UPDATE LOOP
--- ============================================================
-local function updateZoneMarkers(dt)
-    if not Config.ESP.Enabled or not Config.ESP.ShowZoneMarkers then return end
-    
-    for characterModel, markers in pairs(State.espZoneMarkers) do
-        if characterModel and characterModel.Parent then
-            for markerName, markerData in pairs(markers) do
-                if markerData.updateFunc then
-                    pcall(function()
-                        markerData.updateFunc(dt, markerData.ownerModel, markerData.targetModel)
-                    end)
-                end
-            end
-        else
-            removeAllZoneMarkers(characterModel)
-        end
-    end
-end
-
--- ============================================================
--- FULL ESP REFRESH FOR A MODEL
--- ============================================================
-local function refreshESPForModel(characterModel)
-    if not characterModel or isMyCharacter(characterModel) then return end
-    
-    removeESPOverlay(characterModel)
-    removeESPHealthBar(characterModel)
-    removeAllZoneMarkers(characterModel)
-    
-    if not Config.ESP.Enabled then return end
-    if not characterModel.Parent then return end
-    
-    if Config.ESP.ShowOverlay then
-        createESPOverlay(characterModel)
-    end
-    
-    if Config.ESP.HealthBarEnabled then
-        createESPHealthBar(characterModel)
-    end
-    
-    if Config.ESP.ShowZoneMarkers then
-        for _, markerConfig in ipairs(ESP_ZONE_MARKERS) do
-            if markerConfig.enabled then
-                createZoneMarker(markerConfig, characterModel)
-            end
-        end
-    end
-end
-
--- ============================================================
--- ESP SETUP / TEARDOWN / TOGGLE / MAIN UPDATE
--- ============================================================
-local function setupESPForModel(characterModel)
-    if not characterModel or isMyCharacter(characterModel) then return end
-    
-    State.espUpdateTimers[characterModel] = 0
-    
-    task.wait(0.5)
-    
-    refreshESPForModel(characterModel)
-end
-
-local function removeESPForModel(characterModel)
-    removeESPOverlay(characterModel)
-    removeESPHealthBar(characterModel)
-    removeAllZoneMarkers(characterModel)
-    State.espUpdateTimers[characterModel] = nil
-end
-
-local function toggleESP()
-    Config.ESP.Enabled = not Config.ESP.Enabled
-    
-    if Config.ESP.Enabled then
-        local allModels = getAllTargetModels()
-        for _, characterModel in ipairs(allModels) do
-            refreshESPForModel(characterModel)
-        end
-    else
-        local allModels = getAllTargetModels()
-        for _, characterModel in ipairs(allModels) do
-            removeESPForModel(characterModel)
-        end
-    end
-end
-
-local function updateAllESP(dt)
-    local now = tick()
-    if now - State.lastESPUpdate < Config.ESP.UpdateRate then return end
-    State.lastESPUpdate = now
-    
-    if not Config.ESP.Enabled then return end
-    
-    local allModels = getAllTargetModels()
-    for _, characterModel in ipairs(allModels) do
-        if characterModel.Parent then
-            if Config.ESP.HealthBarEnabled then
-                updateESPHealthBar(characterModel)
-            end
-            if Config.ESP.ShowOverlay then
-                updateESPOverlay(characterModel)
-            end
-        end
-    end
-    
-    if Config.ESP.ShowZoneMarkers then
-        updateZoneMarkers(dt)
-    end
 end
 
 -- ============================================================
@@ -3468,9 +2793,6 @@ local function monitorEnemyAnimations(characterModel)
     
     -- Enhanced death connection that preserves ally status
     local diedConn = humanoid.Died:Connect(function()
-        removeESPOverlay(characterModel)
-        removeESPHealthBar(characterModel)
-        removeAllZoneMarkers(characterModel)
         
         if State.allyMarkers[characterModel] then
             removeAllyMarker(characterModel, false) -- false = keep in tracking for respawn
@@ -3980,7 +3302,6 @@ local function createUnifiedHUD()
     createStatusRow("AimLock", "Aim Lock: Inactive", 1)
     createStatusRow("AutoParry", "Auto-Parry: Active", 2)
     createStatusRow("Triggerbot", "Triggerbot: Inactive", 3)
-    createStatusRow("ESP", "ESP: Active", 4)
     
     unifiedHUD = screenGui
     
@@ -4098,18 +3419,6 @@ local function updateUnifiedHUD()
             end
         end
         
-        local espRow = statusSection:FindFirstChild("ESPRow")
-        if espRow then
-            local indicator = espRow:FindFirstChild("Indicator")
-            local label = espRow:FindFirstChild("Label")
-            if Config.ESP.Enabled then
-                indicator.BackgroundColor3 = Color3.fromRGB(100, 255, 150)
-                label.Text = "ESP: Active"
-            else
-                indicator.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-                label.Text = "ESP: Inactive"
-            end
-        end
     end
 end
 
@@ -4357,9 +3666,6 @@ local function setupPlayerFolderMonitoring()
             task.spawn(function()
                 task.wait(0.3)
                 monitorEnemyAnimations(child)
-                if Config.ESP.Enabled then
-                    setupESPForModel(child)
-                end
                 checkAndRecreateAllyMarker(child)
             end)
         end
@@ -4374,9 +3680,6 @@ local function setupPlayerFolderMonitoring()
             
             monitorEnemyAnimations(child)
             
-            if Config.ESP.Enabled then
-                setupESPForModel(child)
-            end
             
             -- Check if this is a preset ally
             for _, presetName in ipairs(PRESET_ALLIES) do
@@ -4408,7 +3711,6 @@ local function setupPlayerFolderMonitoring()
         removeAllyMarker(child, false) -- false = keep in tracking for respawn
         removeBlacklistMarker(child)
         
-        removeESPForModel(child)
         
         if State.continuousAnimationMonitors[child] then
             for trackId, _ in pairs(State.continuousAnimationMonitors[child]) do
@@ -4486,10 +3788,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if debounceInput("triggerbot_toggle_kb", 0.2) then
             Config.Triggerbot.Enabled = not Config.Triggerbot.Enabled
         end
-    elseif input.KeyCode == Config.Keybinds.ToggleESP then
-        if debounceInput("esp_toggle_kb", 0.2) then
-            toggleESP()
-        end
     elseif input.KeyCode == Enum.KeyCode.Two or input.KeyCode == Enum.KeyCode.Three then
         State.lastAbilityKey = State.activeAbilityKey
         State.activeAbilityKey = input.KeyCode
@@ -4515,7 +3813,6 @@ RunService.RenderStepped:Connect(function(dt)
     updateUnifiedHUD()
     updatePlayerHoverInfo()
     
-    updateAllESP(dt)
     
     -- AIM LOCK LOGIC
     if Config.AimLock.Enabled and State.aiming then
@@ -4838,57 +4135,6 @@ TriggerbotTab:CreateSlider({
     end
 }, "TriggerbotRadius")
 
--- ESP Tab
-local ESPTab = Window:CreateTab({
-    Name = "ESP System",
-    Icon = "visibility",
-    ImageSource = "Material",
-    ShowTitle = true
-})
-
-ESPTab:CreateToggle({
-    Name = "Enable ESP",
-    Description = "Toggle all ESP features",
-    CurrentValue = Config.ESP.Enabled,
-    Callback = function(Value)
-        toggleESP()
-    end,
-}, "ESPEnabled")
-
-ESPTab:CreateToggle({
-    Name = "Show Overlay",
-    Description = "Black transparent overlay on players",
-    CurrentValue = Config.ESP.ShowOverlay,
-    Callback = function(Value)
-        Config.ESP.ShowOverlay = Value
-        local allModels = getAllTargetModels()
-        for _, characterModel in ipairs(allModels) do
-            if Value and Config.ESP.Enabled then
-                createESPOverlay(characterModel)
-            else
-                removeESPOverlay(characterModel)
-            end
-        end
-    end,
-}, "ESPShowOverlay")
-
-ESPTab:CreateToggle({
-    Name = "Show Health Bars",
-    Description = "Display health above players",
-    CurrentValue = Config.ESP.HealthBarEnabled,
-    Callback = function(Value)
-        Config.ESP.HealthBarEnabled = Value
-        local allModels = getAllTargetModels()
-        for _, characterModel in ipairs(allModels) do
-            if Value and Config.ESP.Enabled then
-                createESPHealthBar(characterModel)
-            else
-                removeESPHealthBar(characterModel)
-            end
-        end
-    end,
-}, "ESPHealthBars")
-
 -- Macro Tab
 local MacroTab = Window:CreateTab({
     Name = "Macros",
@@ -5018,7 +4264,6 @@ print("⌨️ CONTROLS:")
 print("  [R] - Toggle Aim Lock")
 print("  [V] - Manual Target Lock")
 print("  [F] - Toggle Triggerbot")
-print("  [Insert] - Toggle ESP")
 print("  [-] - Cycle Targeting Mode")
 print("  [9] - Blacklist Model (hover)")
 print("  [0] - Toggle Ally Marker (hover)")
